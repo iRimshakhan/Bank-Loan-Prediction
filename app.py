@@ -1,6 +1,88 @@
 import streamlit as st
 import pandas as pd
 import joblib
+import mysql.connector
+
+#Database connection function
+def get_database_connection():
+    return mysql.connector.connect(
+        host=st.secrets["mysql"]["host"],
+        user=st.secrets["mysql"]["user"],
+        password=st.secrets["mysql"]["password"],
+        database=st.secrets["mysql"]["database"]
+    )
+
+
+#Function that saves predictions
+def save_prediction(
+    applicant_income,
+    cibil_score,
+    married,
+    self_employed,
+    previous_loan_taken,
+    probability_bad,
+    prediction
+):
+
+    connection = get_database_connection()
+
+    cursor = connection.cursor()
+
+    query = """
+        INSERT INTO predictions (
+            applicant_income,
+            cibil_score,
+            married,
+            self_employed,
+            previous_loan_taken,
+            probability_bad,
+            prediction
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+    """
+
+    values = (
+        applicant_income,
+        cibil_score,
+        married,
+        self_employed,
+        previous_loan_taken,
+        probability_bad,
+        prediction
+    )
+
+    cursor.execute(query, values)
+
+    connection.commit()
+
+    cursor.close()
+    connection.close()
+
+#Function for prediction history
+def get_prediction_history():
+
+    connection = get_database_connection()
+
+    query = """
+        SELECT
+            id,
+            applicant_income,
+            cibil_score,
+            married,
+            self_employed,
+            previous_loan_taken,
+            probability_bad,
+            prediction,
+            created_at
+        FROM predictions
+        ORDER BY created_at DESC
+    """
+
+    history = pd.read_sql(query, connection)
+
+    connection.close()
+
+    return history
 
 
 # --------------------------------------------------
@@ -128,7 +210,7 @@ if st.button(
 
     if probability_bad >= threshold:
 
-        prediction = 1
+        prediction = "Loan Rejected"
 
         st.error(
             "❌ Loan Rejected"
@@ -146,7 +228,7 @@ if st.button(
 
     else:
 
-        prediction = 0
+        prediction = "Loan Approved"
 
         st.success(
             "✅ Loan Approved"
@@ -161,6 +243,68 @@ if st.button(
             "The probability of the customer being classified "
             "as bad is below 70%."
         )
+    save_prediction(
+        applicant_income,
+        cibil_score,
+        married_value,
+        self_employed_value,
+        previous_loan_value,
+        probability_bad,
+        prediction
+    )
+    st.success("Prediction saved successfully! 💾")
+
+
+
+#Prediction History
+st.divider()
+
+st.subheader("📋 Prediction History")
+
+history = get_prediction_history()
+
+if history.empty:
+
+    st.info("No prediction history available.")
+
+else:
+
+    history = history.rename(columns={
+        "id": "ID",
+        "applicant_income": "Applicant Income",
+        "cibil_score": "CIBIL Score",
+        "married": "Married",
+        "self_employed": "Self Employed",
+        "previous_loan_taken": "Previous Loan",
+        "probability_bad": "Bad Customer Probability",
+        "prediction": "Prediction",
+        "created_at": "Date & Time"
+    })
+
+    history["Married"] = history["Married"].map({
+        0: "No",
+        1: "Yes"
+    })
+
+    history["Self Employed"] = history["Self Employed"].map({
+        0: "No",
+        1: "Yes"
+    })
+
+    history["Previous Loan"] = history["Previous Loan"].map({
+        0: "No",
+        1: "Yes"
+    })
+
+    history["Bad Customer Probability"] = (
+        history["Bad Customer Probability"] * 100
+    ).round(2).astype(str) + "%"
+
+    st.dataframe(
+        history,
+        use_container_width=True,
+        hide_index=True
+    )
 
 
 # --------------------------------------------------
